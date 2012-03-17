@@ -27,9 +27,9 @@ int openFile() {
 	unsigned char buff;
 	unsigned char line[MAXLINE];
 
-	pFile = fopen(pFileName, "rb");
+	pPGM = fopen(pPGMName, "rb");
 
-	if (NULL == pFile) {
+	if (NULL == pPGM) {
 		perror("Error Opening File");
 		return -1;
 	}
@@ -38,47 +38,46 @@ int openFile() {
 	 * Remove Header
 	 */
 	for (i = 0; i < HEAD; i++) {
-		getc(pFile);
+		getc(pPGM);
 	}
 
 	for (i = 0; i < HEIGHT; i++) {
 		for (j = 0; j < WIDTH; j++) {
-			buff = (unsigned char) fgetc(pFile);
+			buff = (unsigned char) fgetc(pPGM);
 			imgArray[i][j] = (double) buff - 128;
 		}
 	}
 
-	if (ferror(pFile)) {
+	if (ferror(pPGM)) {
 		perror("Error Reading File");
-		fclose(pFile);
+		fclose(pPGM);
 		return -1;
 	}
+	fclose(pPGM);
 
-	fclose(pFile);
-
-	pFile = fopen("jpeg.book", "rt");
-	if (NULL == pFile) {
+	pBOOK = fopen("jpeg.book", "rt");
+	if (NULL == pBOOK) {
 		perror("Error Opening File");
 		return -1;
 	}
 
 	for (i = 0; i < DCLINE; i++) {
-		fscanf(pFile, "%s", line);
+		fscanf(pBOOK, "%s", line);
 		dcCode[i].category = line[0];
-		fscanf(pFile, "%s", dcCode[i].code);
+		fscanf(pBOOK, "%s", dcCode[i].code);
 	}
 
 	for (i = 0; i < ACLINE; i++) {
-		fscanf(pFile, "%s", line);
+		fscanf(pBOOK, "%s", line);
 		acCode[i].run = line[0];
-		fscanf(pFile, "%s", line);
+		fscanf(pBOOK, "%s", line);
 		acCode[i].level = line[0];
-		fscanf(pFile, "%s", acCode[i].code);
+		fscanf(pBOOK, "%s", acCode[i].code);
 
-		printf("%c  %c  %s\n", acCode[i].run, acCode[i].level, acCode[i].code);
+		if(DEBUG_MODE)
+			printf("%c  %c  %s\n", acCode[i].run, acCode[i].level, acCode[i].code);
 	}
-
-	fclose(pFile);
+	fclose(pBOOK);
 
 	return 0;
 }
@@ -88,17 +87,12 @@ void partition() {
 	double (*p)[8];
 	double* ptr[8];
 
-	fp = fopen("encoded.txt", "wt");
-	pFile = fopen("output.jpg", "wb");
-	if (NULL == pFile) {
+	pOUT = fopen("output", "wb");
+	pBYTEOUT = fopen("byteout", "wt");
+	if (NULL == pOUT) {
 		perror("Error Creating File");
 		return;
 	}
-	/*
-	for (i = 0; i < sizeof(head); i++) {
-		fputc(head[i], pFile);
-	}
-	*/
 
 	ptblk = 0;
 	for (i = 0; i < VBLK; i++) {
@@ -115,14 +109,15 @@ void partition() {
 			}
 			ddct8x8s(-1, ptr);
 
-			for(m = 0; m < 8; m++)
-			{
-				for(n = 0; n < 8; n++)
-				{
-					printf("%f ", imgBlock[m][n]);
+			if (DEBUG_MODE) {
+				for (m = 0; m < 8; m++) {
+					for (n = 0; n < 8; n++) {
+						printf("%f ", imgBlock[m][n]);
+					}
 				}
+				printf("\n");
 			}
-			printf("\n");
+
 			quantize();
 			zigzag();
 			dpcmRle();
@@ -130,7 +125,8 @@ void partition() {
 			ptblk++;
 		}
 	}
-	fclose(pFile);
+	fclose(pOUT);
+	fclose(pBYTEOUT);
 }
 
 void quantize() {
@@ -168,10 +164,12 @@ void zigzag() {
 		}
 		DCTcoeff[i] = imgBlock[j][k];
 	}
-	for (i = 0; i < 64; i++) {
-		printf("%d ", (int) DCTcoeff[i]);
+	if (DEBUG_MODE) {
+		for (i = 0; i < 64; i++) {
+			printf("%d ", (int) DCTcoeff[i]);
+		}
+		printf("\n");
 	}
-	printf("\n");
 }
 
 void dpcmRle() {
@@ -182,7 +180,7 @@ void dpcmRle() {
 	int i = 1, j, running = 0;
 
 	/*
-	 * DC
+	 * DC, results appended to firstElem
 	 */
 	if (pblk == 0) {
 		dc = (int) DCTcoeff[0];
@@ -202,7 +200,7 @@ void dpcmRle() {
 	strcat(firstElem, secondElem);
 
 	/*
-	 * AC
+	 * AC, results appended to firstElem
 	 */
 	do {
 		if (DCTcoeff[i] == 0 && running == 0) {
@@ -249,6 +247,9 @@ void dpcmRle() {
 		i++;
 	} while (i <= 63);
 
+	// Write firstElem into file, for comparesion
+	fprintf(pBYTEOUT, "%s\n", firstElem);
+
 	// Writing into file
 	j = 0;
 	while (firstElem[j] != 0) {
@@ -263,16 +264,12 @@ void dpcmRle() {
 					temp |= mask[i];
 				}
 			}
-			fputc(temp, pFile);
-			if (temp == 0xFF){
-			// 0x00 follows 0xFF
-				fputc(0, pFile);
-			}
+			fputc(temp, pOUT);
 			elemPtr = 0;
 		}
 	}
 
-	if (ptblk == TBLK-1) {
+	if (ptblk == TBLK - 1) {
 		while (elemPtr < 8) {
 			elem[elemPtr] = 0;
 			elemPtr++;
@@ -282,15 +279,11 @@ void dpcmRle() {
 				temp |= mask[i];
 			}
 		}
-		fputc(temp, pFile);
-		/*
-		fputc(EOI[0], pFile);
-		fputc(EOI[1], pFile);
-		*/
-		printf("finish");
-		printf("here\n");
+		fputc(temp, pOUT);
+		printf("finish\n");
 	}
-	printf("%s\n\n", firstElem);
+	if (DEBUG_MODE)
+		printf("%s\n\n", firstElem);
 	preDC = (int) DCTcoeff[0];
 }
 
